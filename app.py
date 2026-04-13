@@ -223,9 +223,44 @@ def _human(n: int) -> str:
 
 # ── FFmpeg ────────────────────────────────────────────────────────────────────
 
+# Persistent location for extracted ffmpeg when running as a frozen EXE
+APPDATA_DIR  = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "AllenPuhDestroyer")
+BUNDLED_FFMPEG_PATH = os.path.join(APPDATA_DIR, "bin", "ffmpeg.exe")
+
 def find_ffmpeg() -> str | None:
+    # When frozen by PyInstaller, extract bundled ffmpeg to a persistent location
+    if getattr(sys, 'frozen', False):
+        if not os.path.isfile(BUNDLED_FFMPEG_PATH):
+            bundled_src = os.path.join(sys._MEIPASS, 'bin', 'ffmpeg.exe')
+            if os.path.isfile(bundled_src):
+                os.makedirs(os.path.dirname(BUNDLED_FFMPEG_PATH), exist_ok=True)
+                shutil.copy2(bundled_src, BUNDLED_FFMPEG_PATH)
+        if os.path.isfile(BUNDLED_FFMPEG_PATH): return BUNDLED_FFMPEG_PATH
     if os.path.isfile(FFMPEG_PATH): return FFMPEG_PATH
     return shutil.which("ffmpeg")
+
+def _ensure_playwright_browsers():
+    """Auto-install Playwright Chromium on first run if missing (EXE mode)."""
+    if not getattr(sys, 'frozen', False): return  # only needed in EXE
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            _ = pw.chromium.executable_path  # raises if browsers not installed
+    except Exception:
+        console.print(Panel(
+            "[bold yellow]One-time setup:[/] Chromium browser not found.\n"
+            "Downloading now (~120 MB) — this only happens once...",
+            border_style="yellow", title="[bold]First Run Setup[/]"
+        ))
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=False
+        )
+        if result.returncode != 0:
+            console.print("[red]Failed to install Chromium. Run manually:[/]")
+            console.print("  playwright install chromium")
+            sys.exit(1)
 
 def download_ffmpeg() -> str:
     console.print("\n[bold yellow]FFmpeg not found — downloading portable build...[/]\n")
@@ -950,6 +985,7 @@ def prompt_confirm(queue: list, output_dir: str, ctx=None) -> bool:
 # ── Main state machine ────────────────────────────────────────────────────────
 
 def main():
+    _ensure_playwright_browsers()
     ffmpeg = find_ffmpeg()
 
     # ── Welcome ───────────────────────────────────────────────────────────
