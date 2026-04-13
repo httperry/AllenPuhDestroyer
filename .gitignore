@@ -1,0 +1,6 @@
+Allen_Materials/
+chrome_profile/
+__pycache__/
+*.pyc
+*.pyo
+session.json
