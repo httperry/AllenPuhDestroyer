@@ -5,6 +5,10 @@ A zero-configuration tool that downloads all your Allen study materials
 Works with any Allen account that is logged into Chrome.
 
 
+> [!WARNING]
+> **Use at your own risk.** This tool interacts with Allen's platform in ways that may violate their Terms of Service. The creator is not responsible for any consequences including but not limited to account suspension, bans, or loss of access. By using this tool, you accept full responsibility for any outcome.
+
+
 ## How It Works
 
 1. The tool copies your existing Chrome session to authenticate with the
