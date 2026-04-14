@@ -14,14 +14,13 @@ Works with any Allen account that is logged into Chrome.
 1. The tool copies your existing Chrome session to authenticate with the
    Allen API. No tokens to manage, no passwords to enter.
 
-2. A headless browser navigates the Allen platform, intercepting API
-   responses to discover your subjects, chapters, and content.
+2. The tool bypasses the new Allen WAF (Web Application Firewall) checks by extracting validation metadata dynamically from the hydration payload.
+   
+3. A headless browser captures your secure `Cookie` session tokens, handing them off to a lightning-fast native `urllib` API fetcher to traverse your batches, subjects, and chapters without triggering rate limits.
 
-3. PDFs are downloaded directly from CloudFront. Videos are downloaded
-   from the Akamai CDN via ffmpeg, which handles the encrypted HLS
-   streams and muxes audio + video into a single MP4 file.
+4. PDFs are downloaded directly. Videos are downloaded from the Akamai CDN via `ffmpeg`, which is armed with your active session cookies to bypass HTTP 403 Forbidden checks and stream the encrypted HLS chunks directly into a single `.mp4` file.
 
-4. A session file tracks progress. If the download is interrupted, just
+5. A session file tracks progress. If the download is interrupted, just
    run the tool again and it picks up exactly where it left off.
 
 
@@ -47,6 +46,13 @@ Works with any Allen account that is logged into Chrome.
 
 ## Setup
 
+### Option 1: Prebuilt Executable (Recommended)
+
+Starting from **v1.1.0**, pre-compiled, standalone executables are available on the [GitHub Releases](https://github.com/httperry/AllenPuhDestroyer/releases) page. 
+You do not need to install Python, Node.js, or manage any packages. Just download `AllenPuhDestroyer.exe` and run it!
+
+### Option 2: Running from Source
+
 ```
 git clone https://github.com/httperry/AllenPuhDestroyer.git
 cd AllenPuhDestroyer
@@ -54,14 +60,18 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-
 ## Usage
 
+**If using the executable:**
+Simply double-click `AllenPuhDestroyer.exe`.
+
+**If running from source:**
 ```
 python app.py
 ```
 
-Close all Chrome windows before running. The tool will guide you through:
+Close all Chrome/Brave/Edge windows before running. The tool will guide you through:
+
 
 1. Content type selection (PDFs, concept videos, live lectures)
 2. Output directory (default or browse for an external drive)
