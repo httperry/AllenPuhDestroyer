@@ -71,7 +71,7 @@ THEME = get_style({
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-VERSION      = "1.0.0"
+VERSION      = "1.1.0"
 PROFILE_DIR  = os.path.join(os.getcwd(), "chrome_profile")
 PROFILE_DEF  = os.path.join(PROFILE_DIR, "Default")
 ALLEN_BASE   = "https://allen.in"

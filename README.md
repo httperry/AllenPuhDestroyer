@@ -57,6 +57,7 @@ You do not need to install Python, Node.js, or manage any packages. Just downloa
 git clone https://github.com/httperry/AllenPuhDestroyer.git
 cd AllenPuhDestroyer
 pip install -r requirements.txt
+winget install -e --id Gyan.FFmpeg
 playwright install chromium
 ```
 
