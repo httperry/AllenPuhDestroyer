@@ -18,7 +18,7 @@ if errorlevel 1 ( echo ERROR: pip install failed & pause & exit /b 1 )
 echo [2/4] Checking for ffmpeg...
 if not exist "bin\ffmpeg.exe" (
     echo  ffmpeg not found — downloading portable build...
-    python -c "from app import download_ffmpeg; download_ffmpeg()"
+    python -c "from app_exe import download_ffmpeg; download_ffmpeg()"
     if errorlevel 1 ( echo ERROR: ffmpeg download failed & pause & exit /b 1 )
 ) else (
     echo  ffmpeg found: bin\ffmpeg.exe
