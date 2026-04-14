@@ -1152,9 +1152,38 @@ def prompt_confirm(queue: list, output_dir: str, ctx=None) -> bool:
         default=True, style=THEME, mandatory=False,
     ))
 
+def show_disclaimer():
+    """Display a legal liability shield and force user acceptance."""
+    console.clear()
+    from rich.panel import Panel
+    from InquirerPy import inquirer
+    
+    msg = (
+        "[bold red]LEGAL TERMS & RESPONSIBILITY AGREEMENT[/]\n\n"
+        "1. [bold white]Educational/Research Purpose:[/] This tool is a Proof-of-Concept for studying "
+        "web security and API architectures. It is NOT intended for content piracy.\n\n"
+        "2. [bold white]User Responsibility:[/] By clicking '[green]Accept[/]', you confirm that you have "
+        "a legal right to access the content you are downloading. You assume 100% of the risk "
+        "including account suspension or legal action by service providers.\n\n"
+        "3. [bold white]Developer Immunity:[/] The developer assumes NO liability for misuse, "
+        "account bans, or legal consequences arising from this software. This software is "
+        "provided 'AS IS' without any warranty.\n\n"
+        "[dim]Do you accept these terms and take full responsibility for the use of this tool?[/]"
+    )
+    console.print(Panel(msg, border_style="yellow", title="[bold yellow]Privacy & Liability Notice[/]"))
+    
+    accepted = ask(inquirer.confirm(
+        message="I Accept these terms and want to proceed",
+        default=False, style=THEME, mandatory=False
+    ))
+    if not accepted:
+        console.print("[red]Terms declined. Exiting...[/]")
+        sys.exit(0)
+
 # ── Main state machine ────────────────────────────────────────────────────────
 
 def main():
+    show_disclaimer()
     if not load_browser_config():
         setup_browser_config()
     ffmpeg = find_ffmpeg()
