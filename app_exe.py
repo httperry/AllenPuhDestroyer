@@ -461,6 +461,7 @@ def get_page(ctx):
     return page
 
 HEADERS_CACHE = {}
+COOKIES_CACHE = ""
 
 PLAYWRIGHT_LOCK = threading.Lock()
 
@@ -474,11 +475,13 @@ def fetch_page(page, url: str) -> dict:
         return {}
 
 def fast_fetch_page(page, url: str) -> dict:
+    from urllib.parse import urlparse, parse_qs
     import urllib.request
-    from urllib.parse import urlparse
     parsed = urlparse(url)
     rel_url = parsed.path
     if parsed.query: rel_url += "?" + parsed.query
+    
+    q_dict = parse_qs(parsed.query)
 
     req_headers = {
         "content-type": "application/json",
@@ -489,10 +492,14 @@ def fast_fetch_page(page, url: str) -> dict:
         k_low = k.lower()
         if k_low not in ["content-length", "host", "connection", "accept-encoding", "content-type", "origin", "referer", "cookie"]:
             req_headers[k_low] = v
+            
+    if 'selected_batch_list' in q_dict:
+        req_headers['x-selected-batch-list'] = q_dict['selected_batch_list'][0]
+    if 'selected_course_id' in q_dict:
+        req_headers['x-selected-course-id'] = q_dict['selected_course_id'][0]
         
-    cookies = page.context.cookies()
-    cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
-    if cookie_str: req_headers["cookie"] = cookie_str
+    global COOKIES_CACHE
+    if COOKIES_CACHE: req_headers["cookie"] = COOKIES_CACHE
     
     req = urllib.request.Request(
         "https://api.allen-live.in/api/v1/pages/getPage",
@@ -508,32 +515,55 @@ def fast_fetch_page(page, url: str) -> dict:
         return fetch_page(page, url)  # Fallback only on real network/API errors
 
 def warmup(page):
+    global COOKIES_CACHE
     def on_req(req):
-        if "/api/v1/pages/getPage" in req.url:
+        if "/api/v1/pages/getPage" in req.url or "/api/v1/user/studentInfo" in req.url:
             HEADERS_CACHE.update(req.headers)
             
     page.on("request", on_req)
     with PLAYWRIGHT_LOCK:
         page.goto(f"{ALLEN_BASE}/library-web", wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(2000)
-    page.remove_listener("request", on_req)
+    page.wait_for_timeout(2500)
+    try:
+        cookies = page.context.cookies()
+        COOKIES_CACHE = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+    except Exception:
+        pass
 
 def get_video_m3u8(page, content_id: str, batch_id: str) -> tuple[str | None, str]:
+    import urllib.request
     err_msg = "Unknown error"
+
+    req_headers = {
+        "accept": "application/json",
+        "origin": "https://allen.in",
+        "referer": "https://allen.in/",
+    }
+    for k, v in HEADERS_CACHE.items():
+        k_low = k.lower()
+        if k_low not in ["content-length", "host", "connection", "accept-encoding", "content-type", "origin", "referer", "cookie"]:
+            req_headers[k_low] = v
+
+    global COOKIES_CACHE
+    if COOKIES_CACHE: req_headers["cookie"] = COOKIES_CACHE
+
     result = {}
     for attempt in range(3):
         try:
-            with PLAYWRIGHT_LOCK:
-                with page.expect_response(lambda r: "/api/v1/video/play" in r.url and r.status == 200, timeout=10000) as resp_info:
-                    page.goto(f"{ALLEN_BASE}/videoPlayer?content_id={content_id}&batch_id={batch_id}", wait_until="domcontentloaded")
-                result = resp_info.value.json().get('data', {})
+            api_url = f"https://api.allen-live.in/api/v1/video/play?content_id={content_id}&batch_id={batch_id}"
+            req = urllib.request.Request(api_url, headers=req_headers, method="GET")
+            with urllib.request.urlopen(req, timeout=12) as r:
+                result = json.loads(r.read().decode("utf-8")).get("data", {})
+            if result:
                 break
+            else:
+                err_msg = "video/play returned empty data"
         except Exception as e:
             err_msg = str(e)
             time.sleep(1)
-            
+
     if not result:
-        return None, err_msg or "Timeout extracting m3u8"
+        return None, err_msg
 
     m3u8 = None
     def find(obj):
@@ -549,6 +579,7 @@ def get_video_m3u8(page, content_id: str, batch_id: str) -> tuple[str | None, st
                 if m3u8: return
     find(result)
     return m3u8, "" if m3u8 else "No master.m3u8 in stream response"
+
 
 # ── API parsers ───────────────────────────────────────────────────────────────
 
@@ -669,9 +700,13 @@ def dl_video(ffmpeg: str, m3u8_url: str, filepath: str, overwrite: bool,
     
     err_msg = "Unknown error"
     for attempt in range(3):
+        headers_arg = 'Referer: https://allen.in/\r\nOrigin: https://allen.in\r\n'
+        global COOKIES_CACHE
+        if COOKIES_CACHE: headers_arg += f"Cookie: {COOKIES_CACHE}\r\n"
+        
         cmd = [ffmpeg, '-y', '-loglevel', 'error',
-               '-headers', 'Referer: https://allen.in/\r\nOrigin: https://allen.in\r\n',
-               '-i', m3u8_url, '-c', 'copy', '-movflags', '+faststart', tmp]
+               '-headers', headers_arg,
+               '-i', m3u8_url, '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', tmp]
         proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True)
         stop = threading.Event()
         def _monitor():
@@ -690,6 +725,7 @@ def dl_video(ffmpeg: str, m3u8_url: str, filepath: str, overwrite: bool,
         if "403 Forbidden" in err: err_msg = "403 Forbidden"
         elif "Input/output error" in err: err_msg = "I/O Error"
         else: err_msg = err.strip().split('\n')[0] if err.strip() else f"exit code {proc.returncode}"
+        err_msg = err_msg.encode('ascii', 'ignore').decode()
         time.sleep(2)
         
     return False, err_msg or "ffmpeg processing failed completely"
@@ -752,6 +788,13 @@ def do_download(ctx, page, session: dict, ffmpeg: str):
             
             def process_item(item):
                 nonlocal done_count, fail_count, skip_count, downloaded_bytes
+                # Python 3.10+ doesn't auto-create event loops in worker threads.
+                # Playwright's sync API needs one, so we set it up here.
+                import asyncio
+                try:
+                    asyncio.get_event_loop()
+                except RuntimeError:
+                    asyncio.set_event_loop(asyncio.new_event_loop())
                 
                 if item['status'] == 'done':
                     with pool_lock:
@@ -786,7 +829,8 @@ def do_download(ctx, page, session: dict, ffmpeg: str):
                     if not m3u8:
                         icon = "[red]✗[/]"
                         with pool_lock:
-                            log_lines.append((icon, item['title'], "no stream"))
+                            safe_err = err_m3u8[:50].replace('\n', ' ')
+                            log_lines.append((icon, item['title'], safe_err))
                             fail_count += 1
                             item['error'] = err_m3u8
                             failures.append(item)
@@ -818,7 +862,8 @@ def do_download(ctx, page, session: dict, ffmpeg: str):
                         done_count += 1
                     else:
                         icon = "[red]✗[/]"
-                        log_lines.append((icon, item['title'], "error"))
+                        safe_err = err_msg[:50].replace('\n', ' ')
+                        log_lines.append((icon, item['title'], safe_err))
                         fail_count += 1
                         item['error'] = err_msg
                         failures.append(item)
