@@ -488,14 +488,11 @@ def fast_fetch_page(page, url: str) -> dict:
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=10) as r:
             res_data = json.loads(r.read().decode("utf-8")).get("data", {})
-            page_content = res_data.get('page_content')
-            if isinstance(page_content, dict) and 'widgets' in page_content and not page_content['widgets']:
-                return fetch_page(page, url)
             return res_data
     except Exception:
-        return fetch_page(page, url)  # Fallback
+        return {}
 
 def warmup(page):
     def on_req(req):
@@ -899,7 +896,6 @@ def browser_detect_account() -> dict:
 
 def browser_fetch_chapters(cfg: dict, sel_sids: list) -> dict:
     topics_by_sid = {}
-    MAX_RETRIES   = 3
     with sync_playwright() as pw:
         ctx  = launch_browser(pw)
         page = get_page(ctx)
@@ -908,19 +904,17 @@ def browser_fetch_chapters(cfg: dict, sel_sids: list) -> dict:
             qs    = build_qs(cfg, {"subject_id": sid})
             url   = f"{ALLEN_BASE}/subject-details?{qs}"
             topics = []
-            for attempt in range(1, MAX_RETRIES + 1):
-                with console.status(f"[bold blue]Fetching topics for {sname}"
-                                    f"{f' (retry {attempt-1}/{MAX_RETRIES-1})' if attempt > 1 else ''}...[/]"):
-                    # First attempt: fast HTTP path; retries: full browser navigation
-                    data   = fast_fetch_page(page, url) if attempt == 1 else fetch_page(page, url)
+            
+            with console.status(f"[bold blue]Fetching topics for {sname}...[/]"):
+                # Fast retries using HTTP request
+                for _ in range(3):
+                    data   = fast_fetch_page(page, url)
                     topics = get_topics(data)
-                if topics:
-                    break
-                if attempt < MAX_RETRIES:
-                    console.print(f"  [yellow]⚠[/]  {sname}: 0 chapters — retrying ({attempt}/{MAX_RETRIES - 1})...")
-                    time.sleep(2 * attempt)  # 2 s, then 4 s
+                    if topics: break
+                    time.sleep(0.5)
+
             if not topics:
-                console.print(f"  [red]✗[/]  {sname}: still 0 chapters after {MAX_RETRIES} attempts — skipping.")
+                console.print(f"  [red]✗[/]  {sname}: 0 chapters found.")
             else:
                 console.print(f"  [dim]{sname}:[/] {len(topics)} chapters")
             topics_by_sid[sid] = topics
@@ -931,7 +925,6 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                                selected_types: list, need_videos: bool,
                                output_dir: str) -> list:
     queue      = []
-    MAX_RETRIES = 3
     with sync_playwright() as pw:
         ctx  = launch_browser(pw)
         page = get_page(ctx)
@@ -947,28 +940,29 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                 url = f"{ALLEN_BASE}/topic-details?{qs}"
 
                 data = {}
-                for attempt in range(1, MAX_RETRIES + 1):
-                    data = fast_fetch_page(page, url) if attempt == 1 else fetch_page(page, url)
-                    if data: break
-                    if attempt < MAX_RETRIES:
-                        time.sleep(2 * attempt)
+                # Fast retries
+                for _ in range(3):
+                    data = fast_fetch_page(page, url)
+                    if data.get('page_content', {}).get('widgets'):
+                        break
+                    time.sleep(0.5)
 
                 if not data:
-                    console.print("  [yellow]— no data after retries[/]")
+                    console.print("  [yellow]— no data[/]")
                     continue
 
                 ch_safe = safe_name(tname)
                 p_count = v_count = 0
 
                 if "pdfs" in selected_types:
-                    pdfs = collect_pdfs(data)
-                    # Retry content collection if empty
-                    if not pdfs:
-                        for attempt in range(2, MAX_RETRIES + 1):
-                            data = fetch_page(page, url)
-                            pdfs = collect_pdfs(data)
-                            if pdfs: break
-                            time.sleep(2 * attempt)
+                    # Give it up to 3 fast checks
+                    pdfs = []
+                    for _ in range(3):
+                        pdfs = collect_pdfs(data)
+                        if pdfs: break
+                        data = fast_fetch_page(page, url)
+                        time.sleep(0.2)
+                    
                     for pdf in pdfs:
                         folder = os.path.join(output_dir, sname, ch_safe, *pdf['category'])
                         queue.append({
@@ -981,14 +975,14 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                         p_count += 1
 
                 if need_videos:
-                    videos = collect_videos(data)
-                    # Retry content collection if empty
-                    if not videos:
-                        for attempt in range(2, MAX_RETRIES + 1):
-                            data   = fetch_page(page, url)
-                            videos = collect_videos(data)
-                            if videos: break
-                            time.sleep(2 * attempt)
+                    videos = []
+                    # Give it up to 3 fast checks
+                    for _ in range(3):
+                        videos = collect_videos(data)
+                        if videos: break
+                        data = fast_fetch_page(page, url)
+                        time.sleep(0.2)
+                        
                     groups = {}
                     for v in videos:
                         groups.setdefault(v['section'], []).append(v)
@@ -1014,7 +1008,7 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                 if p_count: parts.append(f"{p_count} PDFs")
                 if v_count: parts.append(f"{v_count} videos")
                 console.print(f"  — {', '.join(parts) if parts else 'nothing'}")
-                time.sleep(0.3)
+                time.sleep(0.2)
         ctx.close()
     return queue
 
