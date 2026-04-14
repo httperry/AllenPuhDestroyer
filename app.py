@@ -501,11 +501,17 @@ def warmup(page):
     def on_req(req):
         if "/api/v1/pages/getPage" in req.url:
             HEADERS_CACHE.update(req.headers)
-            
+
     page.on("request", on_req)
     with PLAYWRIGHT_LOCK:
         page.goto(f"{ALLEN_BASE}/", wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(2000)
+    
+    # Reload page to refresh session state before data fetch
+    with PLAYWRIGHT_LOCK:
+        page.reload(wait_until="domcontentloaded")
+    page.wait_for_timeout(1000)
+
     page.remove_listener("request", on_req)
 
 def get_video_m3u8(page, content_id: str, batch_id: str) -> tuple[str | None, str]:
@@ -924,7 +930,8 @@ def browser_fetch_chapters(cfg: dict, sel_sids: list) -> dict:
 def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                                selected_types: list, need_videos: bool,
                                output_dir: str) -> list:
-    queue = []
+    queue      = []
+    MAX_RETRIES = 3
     with sync_playwright() as pw:
         ctx  = launch_browser(pw)
         page = get_page(ctx)
@@ -936,14 +943,33 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
             for tid, tname in chapters:
                 ch_i += 1
                 console.print(f"  [dim][{ch_i}/{total_ch}][/]  {sname} › {tname}", end="")
-                qs   = build_qs(cfg, {"subject_id": sid, "topic_id": tid})
-                data = fast_fetch_page(page, f"{ALLEN_BASE}/topic-details?{qs}")
+                qs  = build_qs(cfg, {"subject_id": sid, "topic_id": tid})
+                url = f"{ALLEN_BASE}/topic-details?{qs}"
+
+                data = {}
+                for attempt in range(1, MAX_RETRIES + 1):
+                    data = fast_fetch_page(page, url) if attempt == 1 else fetch_page(page, url)
+                    if data: break
+                    if attempt < MAX_RETRIES:
+                        time.sleep(2 * attempt)
+
                 if not data:
-                    console.print("  [yellow]— no data[/]"); continue
+                    console.print("  [yellow]— no data after retries[/]")
+                    continue
+
                 ch_safe = safe_name(tname)
                 p_count = v_count = 0
+
                 if "pdfs" in selected_types:
-                    for pdf in collect_pdfs(data):
+                    pdfs = collect_pdfs(data)
+                    # Retry content collection if empty
+                    if not pdfs:
+                        for attempt in range(2, MAX_RETRIES + 1):
+                            data = fetch_page(page, url)
+                            pdfs = collect_pdfs(data)
+                            if pdfs: break
+                            time.sleep(2 * attempt)
+                    for pdf in pdfs:
                         folder = os.path.join(output_dir, sname, ch_safe, *pdf['category'])
                         queue.append({
                             'type': 'pdf', 'subject': sname, 'chapter': ch_safe,
@@ -953,9 +979,18 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                             'status': 'pending',
                         })
                         p_count += 1
+
                 if need_videos:
+                    videos = collect_videos(data)
+                    # Retry content collection if empty
+                    if not videos:
+                        for attempt in range(2, MAX_RETRIES + 1):
+                            data   = fetch_page(page, url)
+                            videos = collect_videos(data)
+                            if videos: break
+                            time.sleep(2 * attempt)
                     groups = {}
-                    for v in collect_videos(data):
+                    for v in videos:
                         groups.setdefault(v['section'], []).append(v)
                     for sec_name, vids in groups.items():
                         sl = sec_name.lower()
@@ -974,6 +1009,7 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                                 'status': 'pending',
                             })
                             v_count += 1
+
                 parts = []
                 if p_count: parts.append(f"{p_count} PDFs")
                 if v_count: parts.append(f"{v_count} videos")
