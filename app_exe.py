@@ -497,14 +497,18 @@ def fast_fetch_page(page, url: str) -> dict:
                 headers=req_headers,
                 timeout=10000
             )
-            if not resp.ok:
-                return fetch_page(page, url)
+            resp_ok = resp.ok
+            if resp_ok:
+                res_data = resp.json().get("data", {})
                 
-            res_data = resp.json().get("data", {})
-            page_content = res_data.get('page_content')
-            if isinstance(page_content, dict) and 'widgets' in page_content and not page_content['widgets']:
-                return fetch_page(page, url)
-            return res_data
+        if not resp_ok:
+            return fetch_page(page, url)
+            
+        page_content = res_data.get('page_content')
+        if isinstance(page_content, dict) and 'widgets' in page_content and not page_content['widgets']:
+            return fetch_page(page, url)
+            
+        return res_data
     except Exception:
         return fetch_page(page, url)  # Fallback
 
