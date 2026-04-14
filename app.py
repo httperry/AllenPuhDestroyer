@@ -462,6 +462,7 @@ def fetch_page(page, url: str) -> dict:
         return {}
 
 def fast_fetch_page(page, url: str) -> dict:
+    import urllib.request
     from urllib.parse import urlparse
     parsed = urlparse(url)
     rel_url = parsed.path
@@ -477,28 +478,22 @@ def fast_fetch_page(page, url: str) -> dict:
         if k_low not in ["content-length", "host", "connection", "accept-encoding", "content-type", "origin", "referer", "cookie"]:
             req_headers[k_low] = v
         
+    cookies = page.context.cookies()
+    cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+    if cookie_str: req_headers["cookie"] = cookie_str
+    
+    req = urllib.request.Request(
+        "https://api.allen-live.in/api/v1/pages/getPage",
+        data=json.dumps({"page_url": rel_url}).encode("utf-8"),
+        headers=req_headers,
+        method="POST"
+    )
     try:
-        with PLAYWRIGHT_LOCK:
-            resp = page.context.request.post(
-                "https://api.allen-live.in/api/v1/pages/getPage",
-                data=json.dumps({"page_url": rel_url}).encode("utf-8"),
-                headers=req_headers,
-                timeout=10000
-            )
-            resp_ok = resp.ok
-            if resp_ok:
-                res_data = resp.json().get("data", {})
-                
-        if not resp_ok:
-            return fetch_page(page, url)
-            
-        page_content = res_data.get('page_content')
-        if isinstance(page_content, dict) and 'widgets' in page_content and not page_content['widgets']:
-            return fetch_page(page, url)
-            
-        return res_data
+        with urllib.request.urlopen(req, timeout=12) as r:
+            res_data = json.loads(r.read().decode("utf-8")).get("data", {})
+            return res_data
     except Exception:
-        return fetch_page(page, url)  # Fallback
+        return fetch_page(page, url)  # Fallback only on real network/API errors
 
 def warmup(page):
     def on_req(req):
@@ -507,7 +502,7 @@ def warmup(page):
             
     page.on("request", on_req)
     with PLAYWRIGHT_LOCK:
-        page.goto(f"{ALLEN_BASE}/", wait_until="domcontentloaded", timeout=60000)
+        page.goto(f"{ALLEN_BASE}/library-web", wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(2000)
     page.remove_listener("request", on_req)
 
