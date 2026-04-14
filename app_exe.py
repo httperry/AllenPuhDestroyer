@@ -500,11 +500,14 @@ def fast_fetch_page(page, url: str) -> dict:
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=15) as r:
             res_data = json.loads(r.read().decode("utf-8")).get("data", {})
+            page_content = res_data.get('page_content')
+            if isinstance(page_content, dict) and 'widgets' in page_content and not page_content['widgets']:
+                return fetch_page(page, url)
             return res_data
     except Exception:
-        return {}
+        return fetch_page(page, url)  # Fallback
 
 def warmup(page):
     def on_req(req):
@@ -515,12 +518,16 @@ def warmup(page):
     with PLAYWRIGHT_LOCK:
         page.goto(f"{ALLEN_BASE}/", wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(2000)
-    
-    # Reload page to refresh session state before data fetch
+
+    # Reload page to refresh session state before data fetch, as requested.
+    # We explicitly wait for the new /getPage response so HEADERS_CACHE gets populated.
     with PLAYWRIGHT_LOCK:
-        page.reload(wait_until="domcontentloaded")
-    page.wait_for_timeout(1000)
-    
+        try:
+            with page.expect_response(lambda r: "/api/v1/pages/getPage" in r.url, timeout=10000):
+                page.reload(wait_until="domcontentloaded")
+        except Exception:
+            page.wait_for_timeout(2000)
+
     page.remove_listener("request", on_req)
 
 def get_video_m3u8(page, content_id: str, batch_id: str) -> tuple[str | None, str]:
@@ -913,30 +920,19 @@ def browser_fetch_chapters(cfg: dict, sel_sids: list) -> dict:
         page = get_page(ctx)
         for sid in sel_sids:
             sname = cfg['subjects'][sid]
-            qs    = build_qs(cfg, {"subject_id": sid})
-            url   = f"{ALLEN_BASE}/subject-details?{qs}"
-            topics = []
-            
             with console.status(f"[bold blue]Fetching topics for {sname}...[/]"):
-                # Fast retries using HTTP request
-                for _ in range(3):
-                    data   = fast_fetch_page(page, url)
-                    topics = get_topics(data)
-                    if topics: break
-                    time.sleep(0.5)
-
-            if not topics:
-                console.print(f"  [red]✗[/]  {sname}: 0 chapters found.")
-            else:
-                console.print(f"  [dim]{sname}:[/] {len(topics)} chapters")
+                qs   = build_qs(cfg, {"subject_id": sid})
+                data = fast_fetch_page(page, f"{ALLEN_BASE}/subject-details?{qs}")
+            topics = get_topics(data)
             topics_by_sid[sid] = topics
+            console.print(f"  [dim]{sname}:[/] {len(topics)} chapters")
         ctx.close()
     return topics_by_sid
 
 def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                                selected_types: list, need_videos: bool,
                                output_dir: str) -> list:
-    queue      = []
+    queue = []
     with sync_playwright() as pw:
         ctx  = launch_browser(pw)
         page = get_page(ctx)
@@ -948,34 +944,14 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
             for tid, tname in chapters:
                 ch_i += 1
                 console.print(f"  [dim][{ch_i}/{total_ch}][/]  {sname} › {tname}", end="")
-                qs  = build_qs(cfg, {"subject_id": sid, "topic_id": tid})
-                url = f"{ALLEN_BASE}/topic-details?{qs}"
-
-                data = {}
-                # Fast retries
-                for _ in range(3):
-                    data = fast_fetch_page(page, url)
-                    if data.get('page_content', {}).get('widgets'):
-                        break
-                    time.sleep(0.5)
-
+                qs   = build_qs(cfg, {"subject_id": sid, "topic_id": tid})
+                data = fast_fetch_page(page, f"{ALLEN_BASE}/topic-details?{qs}")
                 if not data:
-                    console.print("  [yellow]— no data[/]")
-                    continue
-
+                    console.print("  [yellow]— no data[/]"); continue
                 ch_safe = safe_name(tname)
                 p_count = v_count = 0
-
                 if "pdfs" in selected_types:
-                    # Give it up to 3 fast checks
-                    pdfs = []
-                    for _ in range(3):
-                        pdfs = collect_pdfs(data)
-                        if pdfs: break
-                        data = fast_fetch_page(page, url)
-                        time.sleep(0.2)
-                    
-                    for pdf in pdfs:
+                    for pdf in collect_pdfs(data):
                         folder = os.path.join(output_dir, sname, ch_safe, *pdf['category'])
                         queue.append({
                             'type': 'pdf', 'subject': sname, 'chapter': ch_safe,
@@ -985,18 +961,9 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                             'status': 'pending',
                         })
                         p_count += 1
-
                 if need_videos:
-                    videos = []
-                    # Give it up to 3 fast checks
-                    for _ in range(3):
-                        videos = collect_videos(data)
-                        if videos: break
-                        data = fast_fetch_page(page, url)
-                        time.sleep(0.2)
-                        
                     groups = {}
-                    for v in videos:
+                    for v in collect_videos(data):
                         groups.setdefault(v['section'], []).append(v)
                     for sec_name, vids in groups.items():
                         sl = sec_name.lower()
@@ -1015,12 +982,11 @@ def browser_enumerate_content(cfg: dict, sel_chapters: dict,
                                 'status': 'pending',
                             })
                             v_count += 1
-
                 parts = []
                 if p_count: parts.append(f"{p_count} PDFs")
                 if v_count: parts.append(f"{v_count} videos")
                 console.print(f"  — {', '.join(parts) if parts else 'nothing'}")
-                time.sleep(0.2)
+                time.sleep(0.3)
         ctx.close()
     return queue
 
