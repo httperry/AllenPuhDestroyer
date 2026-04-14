@@ -326,11 +326,11 @@ def download_ffmpeg() -> str:
 def load_session() -> dict | None:
     if not os.path.isfile(SESSION_FILE): return None
     try:
-        with open(SESSION_FILE) as f: return json.load(f)
+        with open(SESSION_FILE, encoding='utf-8') as f: return json.load(f)
     except Exception: return None
 
 def save_session(s: dict):
-    with open(SESSION_FILE, 'w') as f:
+    with open(SESSION_FILE, 'w', encoding='utf-8') as f:
         json.dump(s, f, indent=2, ensure_ascii=False)
 
 def count_pending(s: dict) -> int:
