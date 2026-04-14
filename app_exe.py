@@ -243,26 +243,40 @@ def _ensure_playwright_browsers():
     """Auto-install Playwright Chromium on first run if missing (EXE mode).
     Uses a flag file so the check costs a single os.path.isfile() on every
     subsequent launch — zero playwright startup overhead.
+
+    IMPORTANT: must NOT use sys.executable — in a frozen PyInstaller EXE that
+    points back to the EXE itself, causing an infinite re-launch loop.
+    Instead, use playwright's own bundled Node.js driver directly.
     """
     if not getattr(sys, 'frozen', False): return  # only needed in EXE
     flag = os.path.join(APPDATA_DIR, '.chromium_ready')
-    if os.path.isfile(flag): return  # already set up — fast path
-    import subprocess
-    # Install chromium (playwright handles idempotency itself)
+    if os.path.isfile(flag): return  # already set up — fast path (single file check)
+
     console.print(Panel(
-        "[bold yellow]One-time setup:[/] Checking Chromium browser...\n"
-        "If not installed, downloading now (~120 MB) — this only happens once.",
+        "[bold yellow]One-time setup:[/] Installing Chromium browser...\n"
+        "This only happens once (~120 MB download).",
         border_style="yellow", title="[bold]First Run Setup[/]"
     ))
+
+    # Use playwright's own bundled CLI driver (Node.js binary inside the EXE)
+    # This avoids re-invoking sys.executable which would loop back to this EXE.
+    try:
+        from playwright._impl._driver import compute_driver_executable
+        driver = compute_driver_executable()
+    except Exception as e:
+        console.print(f"[red]Cannot locate playwright driver: {e}[/]")
+        sys.exit(1)
+
+    env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium"],
-        capture_output=False
+        [str(driver), "install", "chromium"],
+        env=env, capture_output=False
     )
     if result.returncode != 0:
-        console.print("[red]Failed to install Chromium. Run manually:[/]")
-        console.print("  playwright install chromium")
+        console.print("[red]Chromium install failed.[/] Try deleting the EXE and re-downloading.")
         sys.exit(1)
-    # Write flag so we skip this entire block on every future launch
+
+    # Write flag — next launch skips all of this instantly
     os.makedirs(APPDATA_DIR, exist_ok=True)
     open(flag, 'w').close()
 
