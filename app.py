@@ -477,19 +477,18 @@ def fast_fetch_page(page, url: str) -> dict:
         if k_low not in ["content-length", "host", "connection", "accept-encoding", "content-type", "origin", "referer", "cookie"]:
             req_headers[k_low] = v
         
-    cookies = page.context.cookies()
-    cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
-    if cookie_str: req_headers["cookie"] = cookie_str
-    
-    req = urllib.request.Request(
-        "https://api.allen-live.in/api/v1/pages/getPage",
-        data=json.dumps({"page_url": rel_url}).encode("utf-8"),
-        headers=req_headers,
-        method="POST"
-    )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            res_data = json.loads(r.read().decode("utf-8")).get("data", {})
+        with PLAYWRIGHT_LOCK:
+            resp = page.context.request.post(
+                "https://api.allen-live.in/api/v1/pages/getPage",
+                data={"page_url": rel_url},
+                headers=req_headers,
+                timeout=10000
+            )
+            if not resp.ok:
+                return fetch_page(page, url)
+                
+            res_data = resp.json().get("data", {})
             page_content = res_data.get('page_content')
             if isinstance(page_content, dict) and 'widgets' in page_content and not page_content['widgets']:
                 return fetch_page(page, url)
