@@ -481,7 +481,7 @@ def fast_fetch_page(page, url: str) -> dict:
         with PLAYWRIGHT_LOCK:
             resp = page.context.request.post(
                 "https://api.allen-live.in/api/v1/pages/getPage",
-                data={"page_url": rel_url},
+                data=json.dumps({"page_url": rel_url}).encode("utf-8"),
                 headers=req_headers,
                 timeout=10000
             )
@@ -509,16 +509,6 @@ def warmup(page):
     with PLAYWRIGHT_LOCK:
         page.goto(f"{ALLEN_BASE}/", wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(2000)
-
-    # Reload page to refresh session state before data fetch, as requested.
-    # We explicitly wait for the new /getPage response so HEADERS_CACHE gets populated.
-    with PLAYWRIGHT_LOCK:
-        try:
-            with page.expect_response(lambda r: "/api/v1/pages/getPage" in r.url, timeout=10000):
-                page.reload(wait_until="domcontentloaded")
-        except Exception:
-            page.wait_for_timeout(2000)
-
     page.remove_listener("request", on_req)
 
 def get_video_m3u8(page, content_id: str, batch_id: str) -> tuple[str | None, str]:
