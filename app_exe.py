@@ -905,17 +905,30 @@ def browser_detect_account() -> dict:
 
 def browser_fetch_chapters(cfg: dict, sel_sids: list) -> dict:
     topics_by_sid = {}
+    MAX_RETRIES   = 3
     with sync_playwright() as pw:
         ctx  = launch_browser(pw)
         page = get_page(ctx)
         for sid in sel_sids:
             sname = cfg['subjects'][sid]
-            with console.status(f"[bold blue]Fetching topics for {sname}...[/]"):
-                qs   = build_qs(cfg, {"subject_id": sid})
-                data = fast_fetch_page(page, f"{ALLEN_BASE}/subject-details?{qs}")
-            topics = get_topics(data)
+            qs    = build_qs(cfg, {"subject_id": sid})
+            url   = f"{ALLEN_BASE}/subject-details?{qs}"
+            topics = []
+            for attempt in range(1, MAX_RETRIES + 1):
+                with console.status(f"[bold blue]Fetching topics for {sname}"
+                                    f"{f' (retry {attempt-1}/{MAX_RETRIES-1})' if attempt > 1 else ''}...[/]"):
+                    data   = fast_fetch_page(page, url) if attempt == 1 else fetch_page(page, url)
+                    topics = get_topics(data)
+                if topics:
+                    break
+                if attempt < MAX_RETRIES:
+                    console.print(f"  [yellow]⚠[/]  {sname}: 0 chapters — retrying ({attempt}/{MAX_RETRIES - 1})...")
+                    time.sleep(2 * attempt)
+            if not topics:
+                console.print(f"  [red]✗[/]  {sname}: still 0 chapters after {MAX_RETRIES} attempts — skipping.")
+            else:
+                console.print(f"  [dim]{sname}:[/] {len(topics)} chapters")
             topics_by_sid[sid] = topics
-            console.print(f"  [dim]{sname}:[/] {len(topics)} chapters")
         ctx.close()
     return topics_by_sid
 
