@@ -268,40 +268,33 @@ def find_ffmpeg() -> str | None:
     return shutil.which("ffmpeg")
 
 def _ensure_playwright_browsers():
-    """Auto-install Playwright Chromium on first run if missing (EXE mode).
-    Uses a flag file so the check costs a single os.path.isfile() on every
-    subsequent launch — zero playwright startup overhead.
-
-    IMPORTANT: must NOT use sys.executable — in a frozen PyInstaller EXE that
-    points back to the EXE itself, causing an infinite re-launch loop.
-    Instead, use playwright's own bundled Node.js driver directly.
+    """Check Chromium is installed for playwright (EXE mode only).
+    Checks the standard ms-playwright install location directly — no subprocess,
+    no re-launch loop, works regardless of PyInstaller bundling.
+    If found, writes a flag so subsequent launches skip even this check.
     """
-    if not getattr(sys, 'frozen', False): return  # only needed in EXE
+    if not getattr(sys, 'frozen', False): return
     flag = os.path.join(APPDATA_DIR, '.chromium_ready')
-    if os.path.isfile(flag): return  # already set up — fast path
+    if os.path.isfile(flag): return  # fast path — single file check
 
+    # Check if chromium is in the standard playwright browser cache
+    import glob
+    local_app_data = os.environ.get('LOCALAPPDATA', '')
+    pattern = os.path.join(local_app_data, 'ms-playwright', 'chromium-*', 'chrome-win', 'chrome.exe')
+    if glob.glob(pattern):
+        # Already installed — just stamp the flag
+        os.makedirs(APPDATA_DIR, exist_ok=True)
+        open(flag, 'w').close()
+        return
+
+    # Not installed — show instructions and exit cleanly
     console.print(Panel(
-        "[bold yellow]One-time setup:[/] Installing Chromium browser...\n"
-        "This only happens once (~120 MB download).",
-        border_style="yellow", title="[bold]Setting Up[/]"
+        "[bold yellow]One-time setup required:[/] Chromium browser not found.\n\n"
+        "Run this command once in any terminal, then relaunch the app:\n\n"
+        "  [bold cyan]playwright install chromium[/]",
+        border_style="yellow", title="[bold]Setup Required[/]"
     ))
-    try:
-        from playwright._impl._driver import compute_driver_executable
-        driver = compute_driver_executable()
-    except Exception as e:
-        console.print(f"[red]Cannot locate playwright driver: {e}[/]")
-        sys.exit(1)
-
-    result = subprocess.run(
-        [str(driver), "install", "chromium"],
-        env=os.environ.copy(), capture_output=False
-    )
-    if result.returncode != 0:
-        console.print("[red]Chromium install failed.[/] Try deleting the EXE and re-downloading.")
-        sys.exit(1)
-
-    os.makedirs(APPDATA_DIR, exist_ok=True)
-    open(flag, 'w').close()
+    sys.exit(0)
 
 def download_ffmpeg() -> str:
     console.print("\n[bold yellow]FFmpeg not found — downloading portable build...[/]\n")
