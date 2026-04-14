@@ -72,13 +72,12 @@ THEME = get_style({
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 VERSION      = "1.0.0"
-CHROME_EXE   = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-REAL_PROFILE = os.path.expanduser(r"~\AppData\Local\Google\Chrome\User Data\Default")
 PROFILE_DIR  = os.path.join(os.getcwd(), "chrome_profile")
 PROFILE_DEF  = os.path.join(PROFILE_DIR, "Default")
 ALLEN_BASE   = "https://allen.in"
 CLOUDFRONT   = "https://d2b4i7hu6z450i.cloudfront.net"
 SESSION_FILE = "session.json"
+CONFIG_FILE  = "browser_config.json"
 FFMPEG_DIR   = os.path.join(os.getcwd(), "bin")
 FFMPEG_PATH  = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
 FFMPEG_URL   = ("https://github.com/BtbN/FFmpeg-Builds/releases/download/"
@@ -87,6 +86,35 @@ SKIP_DIRS    = {"Cache", "Code Cache", "GPUCache", "DawnCache", "ShaderCache",
                 "Service Worker", "CacheStorage", "blob_storage"}
 
 STEP_NAMES = ["Content", "Storage", "Account", "Subjects", "Chapters", "Download"]
+
+# Set dynamically by load_browser_config() / setup_browser_config()
+CHROME_EXE   = None
+REAL_PROFILE = None
+
+# Supported browsers with candidate exe paths and User Data directories
+SUPPORTED_BROWSERS = {
+    "Google Chrome": {
+        "exe_candidates": [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ],
+        "user_data": os.path.expanduser(r"~\AppData\Local\Google\Chrome\User Data"),
+    },
+    "Microsoft Edge": {
+        "exe_candidates": [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ],
+        "user_data": os.path.expanduser(r"~\AppData\Local\Microsoft\Edge\User Data"),
+    },
+    "Brave": {
+        "exe_candidates": [
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+        ],
+        "user_data": os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\User Data"),
+    },
+}
 
 # ── Logo ─────────────────────────────────────────────────────────────────────
 
@@ -267,11 +295,133 @@ def save_session(s: dict):
 def count_pending(s: dict) -> int:
     return sum(1 for it in s.get('queue', []) if it.get('status') != 'done')
 
-# ── Chrome profile ────────────────────────────────────────────────────────────
+# ── Browser setup wizard ─────────────────────────────────────────────────────
+
+def _detect_browsers() -> list[str]:
+    """Return names of SUPPORTED_BROWSERS that are actually installed."""
+    found = []
+    for name, info in SUPPORTED_BROWSERS.items():
+        for exe in info["exe_candidates"]:
+            if os.path.isfile(exe):
+                found.append(name)
+                break
+    return found
+
+def _list_profiles(user_data_dir: str) -> list[tuple[str, str]]:
+    """Return [(dir_name, display_name), ...] for all profiles in user_data_dir."""
+    info_cache = {}
+    local_state = os.path.join(user_data_dir, "Local State")
+    if os.path.isfile(local_state):
+        try:
+            with open(local_state, encoding="utf-8") as f:
+                data = json.load(f)
+            info_cache = data.get("profile", {}).get("info_cache", {})
+        except Exception:
+            pass
+    profiles = []
+    try:
+        for entry in os.listdir(user_data_dir):
+            full = os.path.join(user_data_dir, entry)
+            if os.path.isdir(full) and (entry == "Default" or entry.startswith("Profile ")):
+                display = info_cache.get(entry, {}).get("name", entry)
+                profiles.append((entry, display))
+    except Exception:
+        pass
+    if not profiles:
+        profiles = [("Default", "Default")]
+    return sorted(profiles, key=lambda x: (x[0] != "Default", x[0]))
+
+def load_browser_config() -> bool:
+    """Load saved browser/profile config. Returns True if loaded successfully."""
+    global CHROME_EXE, REAL_PROFILE
+    if not os.path.isfile(CONFIG_FILE):
+        return False
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+        CHROME_EXE   = cfg["exe"]
+        REAL_PROFILE = cfg["real_profile"]
+        return bool(CHROME_EXE and REAL_PROFILE)
+    except Exception:
+        return False
+
+def setup_browser_config():
+    """First-run wizard: pick browser → pick profile → save to browser_config.json."""
+    global CHROME_EXE, REAL_PROFILE
+
+    console.clear()
+    console.print(Panel(
+        Text.assemble(
+            (LOGO.strip("\n"), "bold bright_cyan"), "\n\n",
+            ("  First-Run Setup\n", "bold white"),
+            ("  Choose the browser you have Allen logged into.", "dim"),
+        ),
+        border_style="bright_blue", padding=(1, 2)
+    ))
+    console.print()
+
+    # ── Step 1: browser ───────────────────────────────────────────────────
+    available = _detect_browsers()
+    if not available:
+        console.print(Panel(
+            "[red]No supported browser found.[/]\n"
+            "Install Chrome, Edge, or Brave and log into Allen, then run again.",
+            border_style="red", title="[bold red]Error[/]"
+        ))
+        sys.exit(1)
+
+    browser_name = ask(inquirer.select(
+        message="Which browser do you have Allen logged into?",
+        choices=available,
+        style=THEME,
+    ))
+
+    info         = SUPPORTED_BROWSERS[browser_name]
+    user_data    = info["user_data"]
+    exe          = next((e for e in info["exe_candidates"] if os.path.isfile(e)), None)
+
+    # ── Step 2: profile ───────────────────────────────────────────────────
+    profiles = _list_profiles(user_data)
+
+    if len(profiles) == 1:
+        profile_dir, profile_display = profiles[0]
+        console.print(f"\n  [dim]Only one profile found:[/] [cyan]{profile_display}[/]")
+    else:
+        profile_choices = [
+            Choice(value=d, name=f"{n}  [dim]({d})[/dim]")
+            for d, n in profiles
+        ]
+        profile_dir = ask(inquirer.select(
+            message="Which profile is Allen logged into?",
+            choices=profile_choices,
+            style=THEME,
+        ))
+
+    real_profile = os.path.join(user_data, profile_dir)
+
+    # ── Save ──────────────────────────────────────────────────────────────
+    cfg = {"browser": browser_name, "exe": exe, "real_profile": real_profile}
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+    # Wipe any old synced profile so it re-syncs cleanly
+    if os.path.exists(PROFILE_DIR):
+        shutil.rmtree(PROFILE_DIR, ignore_errors=True)
+
+    CHROME_EXE   = exe
+    REAL_PROFILE = real_profile
+
+    console.print()
+    console.print(f"  [green]✓[/] Browser: [cyan]{browser_name}[/]")
+    console.print(f"  [green]✓[/] Profile: [cyan]{real_profile}[/]")
+    console.print(f"  [dim]Config saved. Delete {CONFIG_FILE} to reconfigure.[/]\n")
+    input("  Press Enter to continue...")
+
+# ── Browser profile sync ──────────────────────────────────────────────────────
 
 def sync_profile():
     if os.path.exists(PROFILE_DEF): return
-    console.print("[dim]Syncing Chrome session...[/]")
+    console.print("[dim]Syncing browser session...[/]")
     os.makedirs(PROFILE_DEF, exist_ok=True)
     for item in os.listdir(REAL_PROFILE):
         if item in SKIP_DIRS: continue
@@ -950,6 +1100,8 @@ def prompt_confirm(queue: list, output_dir: str, ctx=None) -> bool:
 # ── Main state machine ────────────────────────────────────────────────────────
 
 def main():
+    if not load_browser_config():
+        setup_browser_config()
     ffmpeg = find_ffmpeg()
 
     # ── Welcome ───────────────────────────────────────────────────────────
