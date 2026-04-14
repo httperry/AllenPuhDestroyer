@@ -267,35 +267,6 @@ def find_ffmpeg() -> str | None:
     if os.path.isfile(FFMPEG_PATH): return FFMPEG_PATH
     return shutil.which("ffmpeg")
 
-def _ensure_playwright_browsers():
-    """Check Chromium is installed for playwright (EXE mode only).
-    Checks the standard ms-playwright install location directly — no subprocess,
-    no re-launch loop, works regardless of PyInstaller bundling.
-    If found, writes a flag so subsequent launches skip even this check.
-    """
-    if not getattr(sys, 'frozen', False): return
-    flag = os.path.join(APPDATA_DIR, '.chromium_ready')
-    if os.path.isfile(flag): return  # fast path — single file check
-
-    # Check if chromium is in the standard playwright browser cache
-    import glob
-    local_app_data = os.environ.get('LOCALAPPDATA', '')
-    pattern = os.path.join(local_app_data, 'ms-playwright', 'chromium-*', 'chrome-win', 'chrome.exe')
-    if glob.glob(pattern):
-        # Already installed — just stamp the flag
-        os.makedirs(APPDATA_DIR, exist_ok=True)
-        open(flag, 'w').close()
-        return
-
-    # Not installed — show instructions and exit cleanly
-    console.print(Panel(
-        "[bold yellow]One-time setup required:[/] Chromium browser not found.\n\n"
-        "Run this command once in any terminal, then relaunch the app:\n\n"
-        "  [bold cyan]playwright install chromium[/]",
-        border_style="yellow", title="[bold]Setup Required[/]"
-    ))
-    sys.exit(0)
-
 def download_ffmpeg() -> str:
     console.print("\n[bold yellow]FFmpeg not found — downloading portable build...[/]\n")
     os.makedirs(FFMPEG_DIR, exist_ok=True)
@@ -1141,7 +1112,6 @@ def prompt_confirm(queue: list, output_dir: str, ctx=None) -> bool:
 # ── Main state machine ────────────────────────────────────────────────────────
 
 def main():
-    _ensure_playwright_browsers()
     if not load_browser_config():
         setup_browser_config()
     ffmpeg = find_ffmpeg()
