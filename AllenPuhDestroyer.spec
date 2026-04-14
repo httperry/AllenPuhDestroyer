@@ -19,7 +19,7 @@ hiddenimports += tmp_h
 datas += [('bin\\ffmpeg.exe', 'bin')]
 
 a = Analysis(
-    ['app.py'],
+    ['app_exe.py'],
     pathex=[],
     datas=datas,
     binaries=binaries,

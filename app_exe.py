@@ -223,9 +223,48 @@ def _human(n: int) -> str:
 
 # ── FFmpeg ────────────────────────────────────────────────────────────────────
 
+# Persistent location for extracted ffmpeg when running as a frozen EXE
+APPDATA_DIR  = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "AllenPuhDestroyer")
+BUNDLED_FFMPEG_PATH = os.path.join(APPDATA_DIR, "bin", "ffmpeg.exe")
+
 def find_ffmpeg() -> str | None:
+    # When frozen by PyInstaller, extract bundled ffmpeg to a persistent location
+    if getattr(sys, 'frozen', False):
+        if not os.path.isfile(BUNDLED_FFMPEG_PATH):
+            bundled_src = os.path.join(sys._MEIPASS, 'bin', 'ffmpeg.exe')
+            if os.path.isfile(bundled_src):
+                os.makedirs(os.path.dirname(BUNDLED_FFMPEG_PATH), exist_ok=True)
+                shutil.copy2(bundled_src, BUNDLED_FFMPEG_PATH)
+        if os.path.isfile(BUNDLED_FFMPEG_PATH): return BUNDLED_FFMPEG_PATH
     if os.path.isfile(FFMPEG_PATH): return FFMPEG_PATH
     return shutil.which("ffmpeg")
+
+def _ensure_playwright_browsers():
+    """Auto-install Playwright Chromium on first run if missing (EXE mode).
+    Uses a flag file so the check costs a single os.path.isfile() on every
+    subsequent launch — zero playwright startup overhead.
+    """
+    if not getattr(sys, 'frozen', False): return  # only needed in EXE
+    flag = os.path.join(APPDATA_DIR, '.chromium_ready')
+    if os.path.isfile(flag): return  # already set up — fast path
+    import subprocess
+    # Install chromium (playwright handles idempotency itself)
+    console.print(Panel(
+        "[bold yellow]One-time setup:[/] Checking Chromium browser...\n"
+        "If not installed, downloading now (~120 MB) — this only happens once.",
+        border_style="yellow", title="[bold]First Run Setup[/]"
+    ))
+    result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        capture_output=False
+    )
+    if result.returncode != 0:
+        console.print("[red]Failed to install Chromium. Run manually:[/]")
+        console.print("  playwright install chromium")
+        sys.exit(1)
+    # Write flag so we skip this entire block on every future launch
+    os.makedirs(APPDATA_DIR, exist_ok=True)
+    open(flag, 'w').close()
 
 def download_ffmpeg() -> str:
     console.print("\n[bold yellow]FFmpeg not found — downloading portable build...[/]\n")
@@ -950,6 +989,7 @@ def prompt_confirm(queue: list, output_dir: str, ctx=None) -> bool:
 # ── Main state machine ────────────────────────────────────────────────────────
 
 def main():
+    _ensure_playwright_browsers()
     ffmpeg = find_ffmpeg()
 
     # ── Welcome ───────────────────────────────────────────────────────────
