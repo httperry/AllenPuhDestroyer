@@ -1,4 +1,11 @@
-# AllenPuhDestroyer
+```text
+ ╔═╗ ╦   ╦   ╔═╗ ╔╗╔     ╔═╗ ╦ ╦ ╦ ╦
+ ╠═╣ ║   ║   ║╣  ║║║     ╠═╝ ║ ║ ╠═╣
+ ╩ ╩ ╩═╝ ╩═╝ ╚═╝ ╝╚╝     ╩   ╚═╝ ╩ ╩
+ ╔╦╗ ╔═╗ ╔═╗ ╔╦╗ ╦═╗ ╔═╗ ╦ ╦ ╔═╗ ╦═╗
+  ║║ ║╣  ╚═╗  ║  ╠╦╝ ║ ║ ╚╦╝ ║╣  ╠╦╝
+ ═╩╝ ╚═╝ ╚═╝  ╩  ╩╚═ ╚═╝  ╩  ╚═╝ ╩╚═
+```
 
 A zero-configuration tool that downloads all your Allen study materials
 (PDFs and video lectures) into a neatly organized folder structure.
