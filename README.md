@@ -14,6 +14,8 @@ Works with any Allen account that is logged into Chrome.
 
 > [!WARNING]
 > **Use at your own risk.** This tool interacts with Allen's platform in ways that may violate their Terms of Service. The creator is not responsible for any consequences including but not limited to account suspension, bans, or loss of access. By using this tool, you accept full responsibility for any outcome.
+> 
+> **Do NOT share downloaded content.** The video streams and PDFs downloaded using this tool contain embedded, invisible user-specific metadata and tracking signatures linking the files directly back to your secure Allen credentials. Distributing or sharing this content with anyone (or uploading it to third-party sites like Telegram, YouTube, or Discord) can result in immediate account termination, telemetry tracking, and severe legal action. This tool is strictly for personal, offline study purposes.
 
 
 ## How It Works
